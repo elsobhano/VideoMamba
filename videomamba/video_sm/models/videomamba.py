@@ -456,9 +456,6 @@ def videomamba_middle(pretrained=False, **kwargs):
 
 
 if __name__ == '__main__':
-    import time
-    from fvcore.nn import FlopCountAnalysis
-    from fvcore.nn import flop_count_table
     import numpy as np
 
     seed = 4217
@@ -466,12 +463,16 @@ if __name__ == '__main__':
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-    num_frames = 8
+    num_frames = 16
     img_size = 224
 
     # To evaluate GFLOPs, pleaset set `rms_norm=False` and `fused_add_norm=False`
     model = videomamba_middle(num_frames=num_frames).cuda()
-    flops = FlopCountAnalysis(model, torch.rand(1, 3, num_frames, img_size, img_size).cuda())
-    s = time.time()
-    print(flop_count_table(flops, max_depth=1))
-    print(time.time()-s)
+    print(sum(p.numel() for p in model.parameters() if p.requires_grad))
+    dummy_input = torch.rand(1, 3, num_frames, img_size, img_size).cuda()
+    output = model(dummy_input)
+    print(output.shape)
+    # flops = FlopCountAnalysis(model, torch.rand(1, 3, num_frames, img_size, img_size).cuda())
+    # s = time.time()
+    # print(flop_count_table(flops, max_depth=1))
+    # print(time.time()-s)
