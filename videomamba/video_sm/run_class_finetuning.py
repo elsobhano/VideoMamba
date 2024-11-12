@@ -29,11 +29,11 @@ def get_args():
     parser = argparse.ArgumentParser('VideoMAE fine-tuning and evaluation script for video classification', add_help=False)
     parser.add_argument('--batch_size', default=64, type=int)
     parser.add_argument('--epochs', default=30, type=int)
-    parser.add_argument('--update_freq', default=1, type=int)
+    parser.add_argument('--update_freq', default=100, type=int)
     parser.add_argument('--save_ckpt_freq', default=100, type=int)
 
     # Model parameters
-    parser.add_argument('--model', default='vit_base_patch16_224', type=str, metavar='MODEL',
+    parser.add_argument('--model', default='videomamba_tiny', type=str, metavar='MODEL',
                         help='Name of model to train')
     parser.add_argument('--tubelet_size', type=int, default=2)
     parser.add_argument('--orig_t_size', type=int, default=8)
@@ -106,7 +106,7 @@ def get_args():
     parser.add_argument('--test_num_crop', type=int, default=3)
     
     # Random Erase params
-    parser.add_argument('--reprob', type=float, default=0.25, metavar='PCT',
+    parser.add_argument('--reprob', type=float, default=0.0, metavar='PCT',
                         help='Random erase prob (default: 0.25)')
     parser.add_argument('--remode', type=str, default='pixel',
                         help='Random erase mode (default: "pixel")')
@@ -130,7 +130,7 @@ def get_args():
                         help='How to apply mixup/cutmix params. Per "batch", "pair", or "elem"')
 
     # Finetuning params
-    parser.add_argument('--finetune', default='', help='finetune from checkpoint')
+    parser.add_argument('--finetune', default='your_model_path/videomamba_t16_k400_f32_res224.pth', help='finetune from checkpoint')
     parser.add_argument('--delete_head', action='store_true', help='whether delete head')
     parser.add_argument('--model_key', default='model|module', type=str)
     parser.add_argument('--model_prefix', default='', type=str)
@@ -163,8 +163,8 @@ def get_args():
     parser.add_argument('--sampling_rate', type=int, default=4)
     parser.add_argument('--trimmed', type=int, default=60)
     parser.add_argument('--time_stride', type=int, default=16)
-    parser.add_argument('--data_set', default='Kinetics', choices=[
-        'Kinetics', 'Kinetics_sparse', 
+    parser.add_argument('--data_set', default='Meign-V', choices=[
+        'Meign-V', 'Kinetics_sparse', 
         'SSV2', 'UCF101', 'HMDB51', 'image_folder',
         'mitv1_sparse', 'LVU', 'COIN', 'Breakfast'
         ], type=str, help='dataset')
@@ -214,19 +214,8 @@ def get_args():
 
     known_args, _ = parser.parse_known_args()
 
-    if known_args.enable_deepspeed:
-        try:
-            import deepspeed
-            from deepspeed import DeepSpeedConfig
-            parser = deepspeed.add_config_arguments(parser)
-            ds_init = deepspeed.initialize
-        except:
-            print("Please 'pip install deepspeed'")
-            exit(0)
-    else:
-        ds_init = None
 
-    return parser.parse_args(), ds_init
+    return parser.parse_args(), None
 
 
 def main(args, ds_init):
@@ -248,12 +237,13 @@ def main(args, ds_init):
     cudnn.benchmark = True
 
     dataset_train, args.nb_classes = build_dataset(is_train=True, test_mode=False, args=args)
-    if args.disable_eval_during_finetuning:
-        dataset_val = None
-    else:
-        dataset_val, _ = build_dataset(is_train=False, test_mode=False, args=args)
+    dataset_val, _ = build_dataset(is_train=False, test_mode=False, args=args)
     dataset_test, _ = build_dataset(is_train=False, test_mode=True, args=args)
-    
+    # if args.disable_eval_during_finetuning:
+    #     dataset_val = None
+    # else:
+    #     dataset_val, _ = build_dataset(is_train=False, test_mode=False, args=args)
+    # dataset_test, _ = build_dataset(is_train=False, test_mode=True, args=args)
 
     num_tasks = utils.get_world_size()
     global_rank = utils.get_rank()
@@ -275,7 +265,7 @@ def main(args, ds_init):
 
     if global_rank == 0 and args.log_dir is not None:
         os.makedirs(args.log_dir, exist_ok=True)
-        log_writer = utils.TensorboardLogger(log_dir=args.log_dir)
+        log_writer = None
     else:
         log_writer = None
 
@@ -319,7 +309,8 @@ def main(args, ds_init):
         data_loader_test = None
 
     mixup_fn = None
-    mixup_active = args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None
+    mixup_active = False
+    # mixup_active = args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None
     if mixup_active:
         print("Mixup is activated!")
         mixup_fn = Mixup(
@@ -338,6 +329,7 @@ def main(args, ds_init):
             num_frames=args.num_frames,
         )
     elif 'videomamba' in args.model:
+        print('use videomamba')
         model = create_model(
             args.model,
             img_size=args.input_size,
@@ -368,7 +360,22 @@ def main(args, ds_init):
             use_mean_pooling=args.use_mean_pooling,
             init_scale=args.init_scale,
         )
-
+    print(model)
+    # setting the logger
+    current_time = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+    WANDB_CONFIG = {"WANDB_API_KEY": "1af8cc2a4ed95f2ba66c31d193caf3dd61c3a41f", "WANDB_IGNORE_GLOBS":"*.patch", 
+                "WANDB_DISABLE_CODE": "true", "TOKENIZERS_PARALLELISM": "false"}
+    def setupWandB(storage=None):
+        os.environ.update(WANDB_CONFIG)
+        if storage is not None:
+            os.environ['WANDB_CACHE_DIR'] = storage+'/wandb/cache'
+            os.environ['WANDB_CONFIG_DIR'] = storage+'/wandb/config'
+    if args.logger == 'wandb':
+        import wandb
+        save_dir=f'{args.log_dir}/log_{current_time}'
+        setupWandB(storage=save_dir)
+        wandb.init(project="VideoMamba")
+    # exit(0)
     patch_size = model.patch_embed.patch_size
     print("Patch size = %s" % str(patch_size))
     args.window_size = (args.num_frames // args.tubelet_size, args.input_size // patch_size[0], args.input_size // patch_size[1])
@@ -530,6 +537,7 @@ def main(args, ds_init):
     print("Update frequent = %d" % args.update_freq)
     print("Number of training examples = %d" % len(dataset_train))
     print("Number of training training per epoch = %d" % num_training_steps_per_epoch)
+    # exit(0)
 
     num_layers = model_without_ddp.get_num_layers()
     if args.layer_decay < 1.0:
@@ -664,13 +672,13 @@ def main(args, ds_init):
                 log_writer.update(val_loss=test_stats['loss'], head="perf", step=epoch)
 
             log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
-                         **{f'val_{k}': v for k, v in test_stats.items()},
-                         'epoch': epoch,
-                         'n_parameters': n_parameters}
+                        **{f'val_{k}': v for k, v in test_stats.items()},
+                        'epoch': epoch,
+                        'n_parameters': n_parameters}
         else:
             log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
-                         'epoch': epoch,
-                         'n_parameters': n_parameters}
+                        'epoch': epoch,
+                        'n_parameters': n_parameters}
         if args.output_dir and utils.is_main_process():
             if log_writer is not None:
                 log_writer.flush()

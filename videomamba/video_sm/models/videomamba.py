@@ -222,6 +222,7 @@ class VisionMamba(nn.Module):
             # checkpoint
             use_checkpoint=False,
             checkpoint_num=0,
+            **kwargs
         ):
         factory_kwargs = {"device": device, "dtype": dtype} # follow MambaLMHeadModel
         super().__init__()

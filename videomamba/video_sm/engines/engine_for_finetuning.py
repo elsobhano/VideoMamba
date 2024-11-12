@@ -79,8 +79,8 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
         loss_value = loss.item()
 
-        loss_list = [torch.zeros_like(loss) for _ in range(dist.get_world_size())]
-        dist.all_gather(loss_list, loss)
+        loss_list = [torch.zeros_like(loss) for _ in range(1)]
+        # dist.all_gather(loss_list, loss)
         loss_list = torch.tensor(loss_list)
         loss_list_isnan = torch.isnan(loss_list).any()
         loss_list_isinf = torch.isinf(loss_list).any()

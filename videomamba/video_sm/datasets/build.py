@@ -207,6 +207,7 @@ def build_dataset(is_train, test_mode, args):
         nb_classes = 101
 
     elif args.data_set in [
+            'Meign-V',
             'LVU',
             'COIN',
             'Breakfast'
@@ -217,7 +218,7 @@ def build_dataset(is_train, test_mode, args):
             mode = 'train'
             anno_path = os.path.join(args.data_path, 'train.csv')
         elif test_mode is True:
-            mode = 'test'
+            mode = 'validation'
             anno_path = os.path.join(args.data_path, 'test.csv') 
         else:  
             mode = 'validation'
@@ -246,8 +247,8 @@ def build_dataset(is_train, test_mode, args):
             time_stride=args.time_stride,
         )
         
-        if args.data_set == "Breakfast":
-            nb_classes = 10
+        if args.data_set == "Meign-V":
+            nb_classes = 2301
         elif args.data_set == "COIN":
             nb_classes = 180
         elif args.data_set == "LVU":

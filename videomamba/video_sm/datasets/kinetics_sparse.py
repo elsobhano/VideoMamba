@@ -76,7 +76,7 @@ class VideoClsDataset_sparse(Dataset):
                 CenterCrop(size=(self.crop_size, self.crop_size)),
                 ClipToTensor(),
                 Normalize(mean=[0.485, 0.456, 0.406],
-                                           std=[0.229, 0.224, 0.225])
+                                        std=[0.229, 0.224, 0.225])
             ])
         elif mode == 'test':
             self.data_resize = Compose([
@@ -85,7 +85,7 @@ class VideoClsDataset_sparse(Dataset):
             self.data_transform = Compose([
                 ClipToTensor(),
                 Normalize(mean=[0.485, 0.456, 0.406],
-                                           std=[0.229, 0.224, 0.225])
+                                        std=[0.229, 0.224, 0.225])
             ])
             self.test_seg = []
             self.test_dataset = []

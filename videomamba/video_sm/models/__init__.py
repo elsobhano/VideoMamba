@@ -24,3 +24,5 @@ from .videomamba import (
 from .videomamba_pretrain import (
     videomamba_middle_pretrain
 )
+
+from .FineTune import FineTuneModel

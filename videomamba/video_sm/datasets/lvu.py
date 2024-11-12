@@ -3,7 +3,6 @@ import os
 import io
 import random
 import numpy as np
-from numpy.lib.function_base import disp
 import torch
 from torchvision import transforms
 import warnings
@@ -27,11 +26,11 @@ except ImportError:
 class LVU(Dataset):
     """Load your own video classification dataset."""
 
-    def __init__(self, anno_path, prefix='', split=' ', mode='train', clip_len=8,
-                 frame_sample_rate=2, crop_size=224, short_side_size=256,
-                 new_height=256, new_width=340, keep_aspect_ratio=True,
-                 num_segment=1, num_crop=1, test_num_segment=10, test_num_crop=3,
-                 args=None, trimmed=60, time_stride=16):
+    def __init__(self, anno_path, prefix='', split=',', mode='train', clip_len=8,
+                frame_sample_rate=2, crop_size=224, short_side_size=256,
+                new_height=256, new_width=340, keep_aspect_ratio=True,
+                num_segment=1, num_crop=1, test_num_segment=10, test_num_crop=3,
+                args=None, trimmed=60, time_stride=16):
         self.anno_path = anno_path
         self.prefix = prefix
         self.split = split
@@ -52,54 +51,19 @@ class LVU(Dataset):
         self.rand_erase = False
         self.trimmed = trimmed
         self.time_stride = time_stride
+        self.num_problem = 0
         print(f"Use trimmed videos of {trimmed} seconds")
         print(f"Time stride: {time_stride} seconds")
         assert num_segment == 1
         if self.mode in ['train']:
             self.aug = True
-            if self.args.reprob > 0:
+            if args.reprob > 0:
                 self.rand_erase = True
         if VideoReader is None:
             raise ImportError("Unable to import `decord` which is required to read videos.")
 
         import pandas as pd
-        cleaned = pd.read_csv(self.anno_path, header=None, delimiter=self.split)
-
-        self.ori_dataset_samples = list(cleaned.values[:, 0])
-        self.ori_label_array = list(cleaned.values[:, 1])
-        self.ori_duration_array = list(cleaned.values[:, 2])
-
-        # 裁剪原始视频
-        self.dataset_samples = []
-        self.label_array = []
-        self.start_array = []
-        self.end_array = []
-        
-        for idx, duration in enumerate(self.ori_duration_array):
-            if duration < trimmed:
-                # 将整个视频作为一个片段
-                self.dataset_samples.append(self.ori_dataset_samples[idx])
-                self.label_array.append(self.ori_label_array[idx])
-                self.start_array.append(0)
-                self.end_array.append(duration)
-            else:
-                starts = [i for i in range(0, int(duration), time_stride)]
-                
-                for start in starts:
-                    end = start + trimmed
-                    # 如果计算的结束点超过视频时长，检查最后一个片段是否至少为trimmed长度的一半
-                    if end > duration:
-                        if duration - start >= trimmed / 2:
-                            # 如果最后一个片段长度至少为trimmed的一半，则使用实际结束时间
-                            end = duration
-                        else:
-                            # 如果最后一个片段长度小于trimmed的一半，则不使用这个片段
-                            continue
-                    
-                    self.dataset_samples.append(self.ori_dataset_samples[idx])
-                    self.label_array.append(self.ori_label_array[idx])
-                    self.start_array.append(start)
-                    self.end_array.append(end)
+        self.cleaned = pd.read_csv(self.anno_path, delimiter=self.split)
 
         self.client = None
         if has_client:
@@ -114,7 +78,7 @@ class LVU(Dataset):
                 CenterCrop(size=(self.crop_size, self.crop_size)),
                 ClipToTensor(),
                 Normalize(mean=[0.485, 0.456, 0.406],
-                                           std=[0.229, 0.224, 0.225])
+                                        std=[0.229, 0.224, 0.225])
             ])
         elif mode == 'test':
             self.data_resize = Compose([
@@ -123,7 +87,7 @@ class LVU(Dataset):
             self.data_transform = Compose([
                 ClipToTensor(),
                 Normalize(mean=[0.485, 0.456, 0.406],
-                                           std=[0.229, 0.224, 0.225])
+                            std=[0.229, 0.224, 0.225])
             ])
             self.test_seg = []
             self.test_dataset = []
@@ -144,26 +108,31 @@ class LVU(Dataset):
         if self.mode == 'train':
             args = self.args 
 
-            sample = self.dataset_samples[index]
-            start = self.start_array[index]
-            end = self.end_array[index]
-            buffer = self.loadvideo_decord(sample, start, end, chunk_nb=-1) # T H W C
+            sample = self.cleaned.iloc[index]
+            file_name = sample['video']
+            start = sample['start_frame']
+            end = sample['stop_frame']
+            label = sample['class_id']
+            # print(file_name, start, end)
+            buffer = self.loadvideo_decord(file_name, start, end, chunk_nb=-1) # T H W C
             if len(buffer) == 0:
+                self.num_problem += 1
                 while len(buffer) == 0:
-                    warnings.warn("video {} not correctly loaded during training".format(sample))
+                    warnings.warn("video {} not correctly loaded during validation".format(sample))
                     index = np.random.randint(self.__len__())
-                    sample = self.dataset_samples[index]
-                    start = self.start_array[index]
-                    end = self.end_array[index]
-                    buffer = self.loadvideo_decord(sample, start, end, chunk_nb=-1)
-
+                    sample = self.cleaned.iloc[index]
+                    file_name = sample['video']
+                    start = sample['start_frame']
+                    end = sample['stop_frame']
+                    label = sample['class_id']
+                    buffer = self.loadvideo_decord(file_name, start, end, chunk_nb=0)
+            # if args.num_sample > 1:
             if args.num_sample > 1:
                 frame_list = []
                 label_list = []
                 index_list = []
                 for _ in range(args.num_sample):
                     new_frames = self._aug_frame(buffer, args)
-                    label = self.label_array[index]
                     frame_list.append(new_frames)
                     label_list.append(label)
                     index_list.append(index)
@@ -171,28 +140,50 @@ class LVU(Dataset):
             else:
                 buffer = self._aug_frame(buffer, args)
             
-            return buffer, self.label_array[index], index, {}
+            channel_dim = buffer.shape[1]
+            if channel_dim < 16:
+                # Determine the number of channels to repeat
+                num_repeat = 16 - channel_dim
+                
+                # Repeat the last channel to pad the tensor
+                buffer = torch.cat([buffer, buffer[:, -1:].repeat(1, num_repeat, 1, 1)], dim=1)
+
+            return buffer, label, index, {}
 
         elif self.mode == 'validation':
-            sample = self.dataset_samples[index]
-            start = self.start_array[index]
-            end = self.end_array[index]
-            buffer = self.loadvideo_decord(sample, start, end, chunk_nb=0)
+            sample = self.cleaned.iloc[index]
+            file_name = sample['video']
+            start = sample['start_frame']
+            end = sample['stop_frame']
+            label = sample['class_id']
+            buffer = self.loadvideo_decord(file_name, start, end, chunk_nb=0)
             if len(buffer) == 0:
                 while len(buffer) == 0:
                     warnings.warn("video {} not correctly loaded during validation".format(sample))
                     index = np.random.randint(self.__len__())
-                    sample = self.dataset_samples[index]
-                    start = self.start_array[index]
-                    end = self.end_array[index]
-                    buffer = self.loadvideo_decord(sample, start, end, chunk_nb=0)
+                    sample = self.cleaned.iloc[index]
+                    file_name = sample['video']
+                    start = sample['start_frame']
+                    end = sample['stop_frame']
+                    label = sample['class_id']
+                    buffer = self.loadvideo_decord(file_name, start, end, chunk_nb=0)
             buffer = self.data_transform(buffer)
-            return buffer, self.label_array[index], sample.split("/")[-1].split(".")[0]
+            
+            channel_dim = buffer.shape[1]
+            if channel_dim < 16:
+                # Determine the number of channels to repeat
+                num_repeat = 16 - channel_dim
+                
+                # Repeat the last channel to pad the tensor
+                buffer = torch.cat([buffer, buffer[:, -1:].repeat(1, num_repeat, 1, 1)], dim=1)
+            
+            return buffer, label, index
 
         elif self.mode == 'test':
-            sample = self.test_dataset[index]
-            start = self.test_start_array[index]
-            end = self.test_end_array[index]
+            sample = self.cleaned.iloc[index]
+            file_name = sample['video']
+            start = sample['start_frame']
+            end = sample['stop_frame']
             chunk_nb, split_nb = self.test_seg[index]
             buffer = self.loadvideo_decord(sample, start, end, chunk_nb=chunk_nb)
 
@@ -223,7 +214,7 @@ class LVU(Dataset):
 
             buffer = self.data_transform(buffer)
             return buffer, self.test_label_array[index], sample.split("/")[-1].split(".")[0], \
-                   chunk_nb, split_nb
+                    chunk_nb, split_nb
         else:
             raise NameError('mode {} unkown'.format(self.mode))
 
@@ -267,7 +258,7 @@ class LVU(Dataset):
             min_scale=256,
             max_scale=320,
             crop_size=self.crop_size,
-            random_horizontal_flip=False if args.data_set == 'SSV2' else True ,
+            random_horizontal_flip=True,
             inverse_uniform_sampling=False,
             aspect_ratio=asp,
             scale=scl,
@@ -318,7 +309,7 @@ class LVU(Dataset):
 
     def loadvideo_decord(self, sample, start, end, chunk_nb=0):
         """Load video content using Decord"""
-        fname = sample
+        fname = sample + ".masked.mp4"
         fname = os.path.join(self.prefix, fname)
 
         try:
@@ -326,29 +317,26 @@ class LVU(Dataset):
                 if "s3://" in fname:
                     video_bytes = self.client.get(fname)
                     vr = VideoReader(io.BytesIO(video_bytes),
-                                     num_threads=1,
-                                     ctx=cpu(0))
+                                    num_threads=1,
+                                    ctx=cpu(0))
                 else:
                     vr = VideoReader(fname, num_threads=1, ctx=cpu(0))
             else:
                 if "s3://" in fname:
                     video_bytes = self.client.get(fname)
                     vr = VideoReader(io.BytesIO(video_bytes),
-                                     width=self.new_width,
-                                     height=self.new_height,
-                                     num_threads=1,
-                                     ctx=cpu(0))
+                                    width=self.new_width,
+                                    height=self.new_height,
+                                    num_threads=1,
+                                    ctx=cpu(0))
                 else:
                     vr = VideoReader(fname, width=self.new_width, height=self.new_height,
                                     num_threads=1, ctx=cpu(0))
 
             fps = vr.get_avg_fps()
-            all_index = self._get_seq_frames(
-                len(vr), int(start * fps), int(end * fps),
-                self.clip_len, clip_idx=chunk_nb
-            )
             vr.seek(0)
-            buffer = vr.get_batch(all_index).asnumpy()
+            # print(list(range(start, end + 1)))
+            buffer = vr.get_batch(list(range(start, end + 1))).asnumpy()
             return buffer
         except:
             print("video cannot be loaded by decord: ", fname)
@@ -356,9 +344,9 @@ class LVU(Dataset):
 
     def __len__(self):
         if self.mode != 'test':
-            return len(self.dataset_samples)
+            return len(self.cleaned)
         else:
-            return len(self.test_dataset)
+            return len(self.cleaned)
 
 
 def spatial_sampling(
@@ -454,3 +442,20 @@ def tensor_normalize(tensor, mean, std):
     tensor = tensor / std
     return tensor
 
+if __name__ == "__main__":
+    dataset = LVU(anno_path = 'data/train_refine.csv',prefix='/home/sobhan/Documents/Datasets/MASKED_VIDEOS/')
+    buffer, label, *_ = dataset[0]
+    print(label)
+    for frames in buffer:
+        print(frames.shape)
+    print('*'*20)
+    buffer, label, *_ = dataset[1]
+    print(label)
+    for frames in buffer:
+        print(frames.shape)
+    print('*'*20)
+    buffer, label, *_ = dataset[2]
+    print(label)
+    for frames in buffer:
+        print(frames.shape)
+    print('*'*20)
