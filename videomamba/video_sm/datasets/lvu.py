@@ -139,7 +139,7 @@ class LVU(Dataset):
                 return frame_list, label_list, index_list, {}
             else:
                 buffer = self._aug_frame(buffer, args)
-            
+            print(buffer.shape)
             channel_dim = buffer.shape[1]
             if channel_dim < 16:
                 # Determine the number of channels to repeat

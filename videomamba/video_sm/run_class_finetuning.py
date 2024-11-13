@@ -23,6 +23,7 @@ from utils import multiple_samples_collate
 import utils
 import contextlib
 from models import *
+from datetime import datetime
 
 
 def get_args():
@@ -170,6 +171,8 @@ def get_args():
         ], type=str, help='dataset')
     parser.add_argument('--output_dir', default='',
                         help='path where to save, empty for no saving')
+    parser.add_argument('--logger', default='wandb',
+                        help='logger')
     parser.add_argument('--log_dir', default=None,
                         help='path where to tensorboard log')
     parser.add_argument('--device', default='cuda',
@@ -675,6 +678,8 @@ def main(args, ds_init):
                         **{f'val_{k}': v for k, v in test_stats.items()},
                         'epoch': epoch,
                         'n_parameters': n_parameters}
+            for k, v in log_stats.items():
+                wandb.log({k: v})
         else:
             log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                         'epoch': epoch,
