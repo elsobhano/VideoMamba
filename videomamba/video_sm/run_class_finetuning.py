@@ -222,20 +222,21 @@ def get_args():
 
 
 def main(args, ds_init):
-    utils.init_distributed_mode(args)
+    # utils.init_distributed_mode(args)
 
-    if ds_init is not None:
-        utils.create_ds_config(args)
-
+    # if ds_init is not None:
+    #     utils.create_ds_config(args)
+    args.distributed = False
     print(args)
 
     device = torch.device(args.device)
 
     # fix the seed for reproducibility
-    seed = args.seed + utils.get_rank()
+    seed = 42
     torch.manual_seed(seed)
     np.random.seed(seed)
-    # random.seed(seed)
+    import random
+    random.seed(seed)
 
     cudnn.benchmark = True
 
@@ -334,6 +335,9 @@ def main(args, ds_init):
     if not args.auto_resume:
         args.log_dir = f'{args.log_dir}/log_{current_time}'
         args.output_dir = f'{args.output_dir}/output_{current_time}'
+        
+    Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+        
 
     def setupWandB(storage=None):
         os.environ.update(WANDB_CONFIG)
@@ -343,7 +347,9 @@ def main(args, ds_init):
     if args.logger == 'wandb':
         import wandb
         setupWandB(storage=args.log_dir)
-        wandb.init(project="VideoMamba")
+        wandb.init(project="VideoMamba-Slurm")
+        wandb.config.update(vars(args))
+        wandb.config.update({"weights_add": args.output_dir})
     # exit(0)
     patch_size = model.patch_embed.patch_size
     print("Patch size = %s" % str(patch_size))
@@ -617,6 +623,7 @@ def main(args, ds_init):
             utils.save_model(
                 args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
                 loss_scaler=loss_scaler, epoch=epoch, model_name='latest', model_ema=model_ema)
+        
         if data_loader_val is not None:
             test_stats = validation_one_epoch(
                 data_loader_val, model, device, amp_autocast,
@@ -648,11 +655,8 @@ def main(args, ds_init):
             log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                         'epoch': epoch,
                         'n_parameters': n_parameters}
-        if args.output_dir and utils.is_main_process():
-            if log_writer is not None:
-                log_writer.flush()
-            with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
-                f.write(json.dumps(log_stats) + "\n")
+        with open("./log.txt", mode="a", encoding="utf-8") as f:
+            f.write(json.dumps(log_stats) + "\n")
 
     preds_file = os.path.join(args.output_dir, str(global_rank) + '.txt')
     if args.test_best:
@@ -684,7 +688,4 @@ def main(args, ds_init):
 
 if __name__ == '__main__':
     opts, ds_init = get_args()
-    print(opts.output_dir)
-    if opts.output_dir:
-        Path(opts.output_dir).mkdir(parents=True, exist_ok=True)
     main(opts, ds_init)
