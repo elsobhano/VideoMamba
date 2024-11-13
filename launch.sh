@@ -1,9 +1,11 @@
 #!/bin/bash
-JOB_NAME='videomamba_tiny_f32_res224'
-OUTPUT_DIR="$(dirname $0)/$JOB_NAME"
-LOG_DIR="./logs/${JOB_NAME}"
+JOB_NAME='videomamba_tiny'
+
+OUTPUT_DIR="./${JOB_NAME}"
+LOG_DIR="./${JOB_NAME}"
 PREFIX='/home/sobhan/Documents/Datasets/MASKED_VIDEOS/'
 DATA_PATH='/home/sobhan/Documents/Code/VideoMamba/videomamba/video_sm/datasets/data'
+PRETRAINED_PATH='/home/sobhan/Documents/Code/VideoMamba/videomamba_t16_k400_f16_res224.pth'
 export PYTHONPATH=.
 
 cd "causal-conv1d"
@@ -16,7 +18,7 @@ cd "videomamba/video_sm"
 
 python run_class_finetuning.py \
     --model videomamba_tiny \
-    --finetune /home/sobhan/Documents/Code/VideoMamba/videomamba_t16_k400_f16_res224.pth \
+    --finetune ${PRETRAINED_PATH} \
     --data_path ${DATA_PATH} \
     --prefix ${PREFIX} \
     --data_set 'Meign-V' \
@@ -45,4 +47,5 @@ python run_class_finetuning.py \
     --test_num_crop 3 \
     --dist_eval \
     --test_best \
+    --no_auto_resume \
     --bf16

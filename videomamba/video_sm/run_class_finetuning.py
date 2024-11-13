@@ -311,27 +311,7 @@ def main(args, ds_init):
     else:
         data_loader_test = None
 
-    mixup_fn = None
-    mixup_active = False
-    # mixup_active = args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None
-    if mixup_active:
-        print("Mixup is activated!")
-        mixup_fn = Mixup(
-            mixup_alpha=args.mixup, cutmix_alpha=args.cutmix, cutmix_minmax=args.cutmix_minmax,
-            prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
-            label_smoothing=args.smoothing, num_classes=args.nb_classes)
-
-    if 'deit' in args.model:
-        model = create_model(
-            args.model,
-            pretrained=True,
-            num_classes=args.nb_classes,
-            fc_drop_rate=args.fc_drop_rate,
-            drop_path_rate=args.drop_path,
-            kernel_size=args.tubelet_size,
-            num_frames=args.num_frames,
-        )
-    elif 'videomamba' in args.model:
+    if 'videomamba' in args.model:
         print('use videomamba')
         model = create_model(
             args.model,
@@ -345,29 +325,16 @@ def main(args, ds_init):
             use_checkpoint=args.use_checkpoint,
             checkpoint_num=args.checkpoint_num,
         )
-    else:
-        model = create_model(
-            args.model,
-            pretrained=False,
-            num_classes=args.nb_classes,
-            all_frames=args.num_frames * args.num_segments,
-            tubelet_size=args.tubelet_size,
-            use_learnable_pos_emb=args.use_learnable_pos_emb,
-            fc_drop_rate=args.fc_drop_rate,
-            drop_rate=args.drop,
-            drop_path_rate=args.drop_path,
-            attn_drop_rate=args.attn_drop_rate,
-            drop_block_rate=None,
-            use_checkpoint=args.use_checkpoint,
-            checkpoint_num=args.checkpoint_num,
-            use_mean_pooling=args.use_mean_pooling,
-            init_scale=args.init_scale,
-        )
-    print(model)
+    # print(model)
     # setting the logger
     current_time = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
     WANDB_CONFIG = {"WANDB_API_KEY": "1af8cc2a4ed95f2ba66c31d193caf3dd61c3a41f", "WANDB_IGNORE_GLOBS":"*.patch", 
                 "WANDB_DISABLE_CODE": "true", "TOKENIZERS_PARALLELISM": "false"}
+
+    if not args.auto_resume:
+        args.log_dir = f'{args.log_dir}/log_{current_time}'
+        args.output_dir = f'{args.output_dir}/output_{current_time}'
+
     def setupWandB(storage=None):
         os.environ.update(WANDB_CONFIG)
         if storage is not None:
@@ -375,8 +342,7 @@ def main(args, ds_init):
             os.environ['WANDB_CONFIG_DIR'] = storage+'/wandb/config'
     if args.logger == 'wandb':
         import wandb
-        save_dir=f'{args.log_dir}/log_{current_time}'
-        setupWandB(storage=save_dir)
+        setupWandB(storage=args.log_dir)
         wandb.init(project="VideoMamba")
     # exit(0)
     patch_size = model.patch_embed.patch_size
@@ -511,7 +477,7 @@ def main(args, ds_init):
                 checkpoint_model['pos_embed'] = new_pos_embed
 
         utils.load_state_dict(model, checkpoint_model, prefix=args.model_prefix)
-
+    # print(model)
     model.to(device)
 
     model_ema = None
@@ -593,12 +559,9 @@ def main(args, ds_init):
         args.weight_decay_end = args.weight_decay
     wd_schedule_values = utils.cosine_scheduler(
         args.weight_decay, args.weight_decay_end, args.epochs, num_training_steps_per_epoch)
-    # print("Max WD = %.7f, Min WD = %.7f" % (max(wd_schedule_values), min(wd_schedule_values)))
+    print("Max WD = %.7f, Min WD = %.7f" % (max(wd_schedule_values), min(wd_schedule_values)))
 
-    if mixup_fn is not None:
-        # smoothing is handled with mixup label transform
-        criterion = SoftTargetCrossEntropy()
-    elif args.smoothing > 0.:
+    if args.smoothing > 0.:
         criterion = LabelSmoothingCrossEntropy(smoothing=args.smoothing)
     else:
         criterion = torch.nn.CrossEntropyLoss()
@@ -637,6 +600,7 @@ def main(args, ds_init):
             data_loader_train.sampler.set_epoch(epoch)
         if log_writer is not None:
             log_writer.set_step(epoch * num_training_steps_per_epoch * args.update_freq)
+        mixup_fn = None
         train_stats = train_one_epoch(
             model, criterion, data_loader_train, optimizer,
             device, epoch, loss_scaler, amp_autocast, args.clip_grad, model_ema, mixup_fn,
@@ -720,6 +684,7 @@ def main(args, ds_init):
 
 if __name__ == '__main__':
     opts, ds_init = get_args()
+    print(opts.output_dir)
     if opts.output_dir:
         Path(opts.output_dir).mkdir(parents=True, exist_ok=True)
     main(opts, ds_init)
