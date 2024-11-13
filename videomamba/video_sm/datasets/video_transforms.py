@@ -1380,4 +1380,4 @@ class ConsistentVideoTransforms:
             self.transform_frame(frame, params) for frame in frames
         ]
         
-        return torch.stack(transformed_frames)
+        return torch.stack(transformed_frames).transpose(0, 1)

@@ -7,14 +7,14 @@ DATA_PATH='/home/sobhan/Documents/Code/VideoMamba/videomamba/video_sm/datasets/d
 export PYTHONPATH=.
 
 cd "causal-conv1d"
-exec pip install -e .
+pip install -e .
 cd ..
 cd "mamba"
-exec pip install -e .
+pip install -e .
 cd ..
 cd "videomamba/video_sm"
 
-exec python run_class_finetuning.py \
+python run_class_finetuning.py \
     --model videomamba_tiny \
     --finetune /home/sobhan/Documents/Code/VideoMamba/videomamba_t16_k400_f16_res224.pth \
     --data_path ${DATA_PATH} \
